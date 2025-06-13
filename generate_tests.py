@@ -1,16 +1,16 @@
 import os, subprocess, ast
-from git import Repo
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 
-# ====== CONFIG ======
-REPO_URL = os.getenv("REPO_URL", "<YOUR_TARGET_REPO>")
-CLONE_DIR = "repo"
-TEST_DIR = os.path.join(CLONE_DIR, "tests")
+# ====== PATH SETUP ======
+MODULE_FILE = "math_utils.py"
+TEST_DIR = "tests"
 os.makedirs(TEST_DIR, exist_ok=True)
 
-# Create __init__.py so pytest detects the folder
+# Create __init__.py so pytest detects test package
 with open(os.path.join(TEST_DIR, "__init__.py"), "w") as f:
+    f.write("")
+with open("__init__.py", "w") as f:
     f.write("")
 
 # ====== LLM SETUP ======
@@ -20,71 +20,64 @@ llm = ChatGoogleGenerativeAI(
     google_api_key=os.getenv("GOOGLE_API_KEY")
 )
 
-# ====== CLONE REPO ======
-def clone_repo():
-    if not os.path.exists(CLONE_DIR):
-        print(f"Cloning {REPO_URL}...")
-        Repo.clone_from(REPO_URL, CLONE_DIR)
-    else:
-        print("Repo already cloned.")
-
 # ====== EXTRACT PYTHON FUNCTIONS ======
 def extract_functions(pyfile):
     with open(pyfile) as f:
         source = f.read()
         tree = ast.parse(source)
-    funcs = [
+    return [
         (node.name, ast.get_source_segment(source, node))
         for node in tree.body if isinstance(node, ast.FunctionDef)
     ]
-    return funcs
 
 # ====== CHECK IF TEST EXISTS ======
 def has_test(func_name):
     return os.path.exists(os.path.join(TEST_DIR, f"test_{func_name}.py"))
 
-# ====== GENERATE TEST CASES ======
-def gen_tests(func_code):
+# ====== GENERATE TESTS WITH IMPORT ======
+def gen_tests(func_code, func_name):
     prompt = ChatPromptTemplate.from_template(
-        "You are a Python test generator. Given this function:\n```python\n{code}\n```"
-        "Write pytest tests that cover normal, edge, and invalid inputs."
+        "You are a Python test generator. Given the following function from the file `math_utils.py`:\n"
+        "```python\n{code}\n```\n"
+        "Write a complete `pytest` test file that imports `{func}` from `math_utils`. "
+        "Cover normal, edge, and invalid inputs with assertions."
     )
-    return llm.invoke(prompt.format_prompt(code=func_code)).content
+    return llm.invoke(prompt.format_prompt(code=func_code, func=func_name)).content
 
 # ====== RUN PYTEST ======
 def run_pytest():
     proc = subprocess.run(
-        ["pytest", "tests", "-q"],
-        cwd=CLONE_DIR, capture_output=True, text=True
+        ["pytest", TEST_DIR, "-q"],
+        env={**os.environ, "PYTHONPATH": "."},
+        capture_output=True, text=True
     )
     return proc.returncode == 0, proc.stdout + proc.stderr
 
-# ====== MAIN LOOP ======
+# ====== MAIN SCRIPT ======
 def main():
-    clone_repo()
+    print(f"🔍 Looking for functions in {MODULE_FILE}...")
+    for func_name, func_code in extract_functions(MODULE_FILE):
+        if has_test(func_name):
+            print(f"✔️ Skipping existing test: {func_name}")
+            continue
 
-    for root, _, files in os.walk(CLONE_DIR):
-        for fn in files:
-            if fn.endswith(".py") and not fn.startswith("test_"):
-                pyfile = os.path.join(root, fn)
-                for name, code in extract_functions(pyfile):
-                    if has_test(name):
-                        print(f"✔️ Skipping test for existing function: {name}")
-                        continue
-                    for attempt in range(3):
-                        print(f"🔍 Generating test for {name} (attempt {attempt+1})")
-                        tests = gen_tests(code)
-                        test_file = os.path.join(TEST_DIR, f"test_{name}.py")
-                        with open(test_file, "w") as f:
-                            f.write(tests)
-                        ok, logs = run_pytest()
-                        print(logs)
-                        if ok:
-                            print(f"✅ Tests for {name} passed")
-                            break
-                        else:
-                            print(f"❌ Tests for {name} failed")
-    print("✅ Done generating and testing.")
+        for attempt in range(3):
+            print(f"\n🧪 Generating test for `{func_name}` (attempt {attempt+1})")
+            test_code = gen_tests(func_code, func_name)
+            test_path = os.path.join(TEST_DIR, f"test_{func_name}.py")
+            with open(test_path, "w") as f:
+                f.write(test_code)
+
+            ok, logs = run_pytest()
+            print(logs)
+
+            if ok:
+                print(f"✅ Tests for `{func_name}` passed")
+                break
+            else:
+                print(f"❌ Tests for `{func_name}` failed — retrying...")
+
+    print("\n🎯 Test generation complete.")
 
 if __name__ == "__main__":
     main()
