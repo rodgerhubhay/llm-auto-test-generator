@@ -8,7 +8,8 @@ CLONE_DIR = "repo"
 TEST_DIR = os.path.join(CLONE_DIR, "tests")
 os.makedirs(TEST_DIR, exist_ok=True)
 
-llm = ChatOpenAI(model="gpt-4", temperature=0, openai_api_key=os.getenv("OPENAI_API_KEY"))
+llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0,
+                             google_api_key=os.getenv("GOOGLE_API_KEY"))
 
 def clone_repo():
     if not os.path.exists(CLONE_DIR):
