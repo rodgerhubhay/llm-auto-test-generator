@@ -1,4 +1,10 @@
-langchain
-openai
-gitpython
-pytest
+# LangChain core and OpenAI integration
+langchain==0.3.22             # includes langchain-core and more :contentReference[oaicite:1]{index=1}
+langchain-openai             # OpenAI chat model support :contentReference[oaicite:2]{index=2}
+
+# Core model libraries
+openai                       # OpenAI SDK (API key needed) :contentReference[oaicite:3]{index=3}
+
+# For Git operations and testing
+gitpython                    # to clone and manage repos programmatically
+pytest                       # to run generated unit tests
