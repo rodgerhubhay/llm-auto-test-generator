@@ -1,6 +1,6 @@
 import os, subprocess, ast
 from git import Repo
-from langchain.chat_models import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 
 REPO_URL = os.getenv("REPO_URL", "<YOUR_TARGET_REPO>")
