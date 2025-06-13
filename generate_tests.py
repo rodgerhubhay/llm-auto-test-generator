@@ -42,7 +42,14 @@ def gen_tests(func_code, func_name):
         "Write a complete `pytest` test file that imports `{func}` from `math_utils`. "
         "Cover normal, edge, and invalid inputs with assertions."
     )
-    return llm.invoke(prompt.format_prompt(code=func_code, func=func_name)).content
+    result = llm.invoke(prompt.format_prompt(code=func_code, func=func_name)).content
+
+    # Strip ```python ... ``` if present
+    if result.strip().startswith("```"):
+        result = result.strip().removeprefix("```python").removesuffix("```").strip()
+
+    return result
+
 
 # ====== RUN PYTEST ======
 def run_pytest():
