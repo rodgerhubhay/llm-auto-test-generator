@@ -1,66 +1,53 @@
-import os, subprocess
+import os, subprocess, ast
 from git import Repo
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.chat_models import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 
-GOOGLE_API_KEY = os.getenv("AIzaSyCRBdJEi8p7ZezUWmNg70Q6_LzmczcsMqI")
-REPO_URL = "https://github.com/rodgerhubhay/llm-auto-test-generator"
+REPO_URL = os.getenv("REPO_URL", "<YOUR_TARGET_REPO>")
 CLONE_DIR = "repo"
 TEST_DIR = os.path.join(CLONE_DIR, "tests")
+os.makedirs(TEST_DIR, exist_ok=True)
+
+llm = ChatOpenAI(model="gpt-4", temperature=0, openai_api_key=os.getenv("OPENAI_API_KEY"))
 
 def clone_repo():
     if not os.path.exists(CLONE_DIR):
         Repo.clone_from(REPO_URL, CLONE_DIR)
 
-def extract_funcs(pyfile):
-    import ast
-    text = open(pyfile).read()
-    tree = ast.parse(text)
-    funcs = []
-    for node in tree.body:
-        if isinstance(node, ast.FunctionDef):
-            src = ast.get_source_segment(text, node)
-            funcs.append((node.name, src))
+def extract_functions(pyfile):
+    with open(pyfile) as f: tree = ast.parse(f.read())
+    funcs = [(node.name, ast.get_source_segment(open(pyfile).read(), node))
+             for node in tree.body if isinstance(node, ast.FunctionDef)]
     return funcs
 
 def has_test(func_name):
-    os.makedirs(TEST_DIR, exist_ok=True)
-    return any(func_name in f for f in os.listdir(TEST_DIR))
+    return any(func_name in fn for fn in os.listdir(TEST_DIR))
 
 def gen_tests(func_code):
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-pro", temperature=0.0, google_api_key=GOOGLE_API_KEY
+    prompt = ChatPromptTemplate.from_template(
+        "You are a Python test generator. Given this function:\n```python\n{code}\n```"
+        "Write pytest tests that cover normal, edge, and invalid inputs."
     )
-    template = ChatPromptTemplate.from_template(
-        "Given this Python function:\n```python\n{code}\n```\n"
-        "Write pytest unit tests covering normal and edge cases."
-    )
-    prompt = template.format_prompt(code=func_code)
-    resp = llm.invoke(prompt.to_dict())
-    return resp.content
+    return llm.invoke(prompt.format_prompt(code=func_code).to_dict()).content
 
 def run_pytest():
-    res = subprocess.run(["pytest", "-q"], cwd=CLONE_DIR, capture_output=True, text=True)
-    return res.returncode == 0, res.stdout + res.stderr
+    proc = subprocess.run(["pytest", "-q"], cwd=CLONE_DIR, capture_output=True, text=True)
+    return proc.returncode == 0, proc.stdout + proc.stderr
 
 def main():
     clone_repo()
-    for root,_,files in os.walk(CLONE_DIR):
+    for root, _, files in os.walk(CLONE_DIR):
         for fn in files:
             if fn.endswith(".py") and not fn.startswith("test_"):
-                for name, code in extract_funcs(os.path.join(root, fn)):
+                for name, code in extract_functions(os.path.join(root, fn)):
                     if has_test(name): continue
-                    for _ in range(3):
+                    for attempt in range(3):
                         tests = gen_tests(code)
                         with open(os.path.join(TEST_DIR, f"test_{name}.py"), "w") as f:
                             f.write(tests)
-                        ok, out = run_pytest()
-                        if ok:
-                            print(f"✅ Tests OK for {name}")
-                            break
-                        else:
-                            print(f"❌ Tests failed for {name}, retrying...")
-    print("Done.")
+                        ok, logs = run_pytest()
+                        print(f"{'✅' if ok else '❌'} {name} (attempt {attempt+1})")
+                        if ok: break
 
 if __name__ == "__main__":
     main()
